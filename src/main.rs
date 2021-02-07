@@ -109,7 +109,6 @@
 #![feature(format_args_nl)]
 #![feature(global_asm)]
 #![feature(panic_info_message)]
-#![feature(range_is_empty)]
 #![no_std]
 #![no_main]
 
