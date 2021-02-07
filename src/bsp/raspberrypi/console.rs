@@ -4,44 +4,34 @@
 
 //! BSP console facilities.
 
-use crate::console;
+use super::memory;
+use crate::{bsp::device_driver, console};
 use core::fmt;
-
-//--------------------------------------------------------------------------------------------------
-// Private Definitions
-//--------------------------------------------------------------------------------------------------
-
-/// A mystical, magical device for generating QEMU output out of the void.
-struct QEMUOutput;
-
-//--------------------------------------------------------------------------------------------------
-// Private Code
-//--------------------------------------------------------------------------------------------------
-
-/// Implementing `core::fmt::Write` enables usage of the `format_args!` macros, which in turn are
-/// used to implement the `kernel`'s `print!` and `println!` macros. By implementing `write_str()`,
-/// we get `write_fmt()` automatically.
-///
-/// See [`src/print.rs`].
-///
-/// [`src/print.rs`]: ../../print/index.html
-impl fmt::Write for QEMUOutput {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        for c in s.chars() {
-            unsafe {
-                core::ptr::write_volatile(0x3F20_1000 as *mut u8, c as u8);
-            }
-        }
-
-        Ok(())
-    }
-}
 
 //--------------------------------------------------------------------------------------------------
 // Public Code
 //--------------------------------------------------------------------------------------------------
 
+/// In case of a panic, the panic handler uses this function to take a last shot at printing
+/// something before the system is halted.
+///
+/// We try to init panic-versions of the GPIO and the UART. The panic versions are not protected
+/// with synchronization primitives, which increases chances that we get to print something, even
+/// when the kernel's default GPIO or UART instances happen to be locked at the time of the panic.
+///
+/// # Safety
+///
+/// - Use only for printing during a panic.
+pub unsafe fn panic_console_out() -> impl fmt::Write {
+    let mut panic_gpio = device_driver::PanicGPIO::new(memory::map::mmio::GPIO_START);
+    let mut panic_uart = device_driver::PanicUart::new(memory::map::mmio::PL011_UART_START);
+
+    panic_gpio.map_pl011_uart();
+    panic_uart.init();
+    panic_uart
+}
+
 /// Return a reference to the console.
-pub fn console() -> impl console::interface::Write {
-    QEMUOutput {}
+pub fn console() -> &'static impl console::interface::All {
+    &super::PL011_UART
 }

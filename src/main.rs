@@ -105,9 +105,10 @@
 //!
 //! [`cpu::boot::arch_boot::_start()`]: ../src/kernel/cpu/up/_arch/aarch64/cpu/boot.rs.html
 
-#![feature(asm)]
+#![feature(const_fn_fn_ptr_basics)]
 #![feature(format_args_nl)]
 #![feature(global_asm)]
+#![feature(trait_alias)]
 #![feature(panic_info_message)]
 #![no_std]
 #![no_main]
@@ -115,18 +116,63 @@
 mod bsp;
 mod console;
 mod cpu;
+mod driver;
 mod panic;
 mod init;
 mod memory;
 mod print;
+mod synchronisation;
+mod time;
 
 /// Early init code.
 ///
 /// # Safety
 ///
 /// - Only a single core must be active and running this function.
+/// - The init calls in this function must appear in the correct order.
 unsafe fn kernel_init() -> ! {
-    println!("[0] Hello from Rust!");
+    use driver::interface::DriverManager;
+    
+    for i in bsp::driver::driver_manager().all_device_drivers().iter() {
+        if let Err(x) = i.init() {
+            panic!("Error loading driver: {}: {}", i.compatible(), x);
+        }
+    }
 
-    panic!("Stopping here.")
+    bsp::driver::driver_manager().post_device_driver_init();
+    // println! is usable from here on.
+
+    // Transition from unsafe to safe.
+    kernel_main()
+}
+        
+/// The main function running after the early init.
+fn kernel_main() -> ! {
+    use core::time::Duration;
+    use driver::interface::DriverManager;
+    use time::interface::TimeManager;
+
+    info!("Booting on: {}", bsp::board_name());
+
+    info!(
+        "Architectural timer resolution: {} ns",
+        time::time_manager().resolution().as_nanos()
+    );
+
+    info!("Drivers loaded:");
+    for (i, driver) in bsp::driver::driver_manager()
+        .all_device_drivers()
+        .iter()
+        .enumerate()
+    {
+        info!("      {}. {}", i + 1, driver.compatible());
+    }
+
+    // Test a failing timer case.
+    time::time_manager().spin_for(Duration::from_nanos(1));
+
+    loop {
+        info!("Spinning for 1 second");
+        time::time_manager().spin_for(Duration::from_secs(1));
+    }
 }

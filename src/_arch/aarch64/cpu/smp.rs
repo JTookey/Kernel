@@ -2,27 +2,28 @@
 //
 // Copyright (c) 2018-2021 Andre Richter <andre.o.richter@gmail.com>
 
-//! Architectural processor code.
+//! Architectural symmetric multiprocessing.
 //!
 //! # Orientation
 //!
 //! Since arch modules are imported into generic modules using the path attribute, the path of this
 //! file is:
 //!
-//! crate::cpu::arch_cpu
+//! crate::cpu::smp::arch_smp
 
-use cortex_a::asm;
+use cortex_a::regs::*;
 
 //--------------------------------------------------------------------------------------------------
 // Public Code
 //--------------------------------------------------------------------------------------------------
 
-pub use asm::nop;
-
-/// Pause execution on the core.
+/// Return the executing core's id.
 #[inline(always)]
-pub fn wait_forever() -> ! {
-    loop {
-        asm::wfe()
-    }
+pub fn core_id<T>() -> T
+where
+    T: From<u8>,
+{
+    const CORE_MASK: u64 = 0b11;
+
+    T::from((MPIDR_EL1.get() & CORE_MASK) as u8)
 }
