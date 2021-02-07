@@ -106,12 +106,28 @@
 //! [`cpu::boot::arch_boot::_start()`]: ../src/kernel/cpu/up/_arch/aarch64/cpu/boot.rs.html
 
 #![feature(asm)]
+#![feature(format_args_nl)]
 #![feature(global_asm)]
-#![no_main]
+#![feature(panic_info_message)]
+#![feature(range_is_empty)]
 #![no_std]
+#![no_main]
 
 mod bsp;
+mod console;
 mod cpu;
 mod panic;
+mod init;
+mod memory;
+mod print;
 
-// Kernel code coming next tutorial.
+/// Early init code.
+///
+/// # Safety
+///
+/// - Only a single core must be active and running this function.
+unsafe fn kernel_init() -> ! {
+    println!("[0] Hello from Rust!");
+
+    panic!("Stopping here.")
+}
