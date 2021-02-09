@@ -105,7 +105,10 @@
 //!
 //! [`cpu::boot::arch_boot::_start()`]: ../src/kernel/cpu/up/_arch/aarch64/cpu/boot.rs.html
 
+#![allow(incomplete_features)]
 #![feature(const_fn_fn_ptr_basics)]
+#![feature(const_generics)]
+#![feature(const_panic)]
 #![feature(format_args_nl)]
 #![feature(global_asm)]
 #![feature(trait_alias)]
@@ -117,9 +120,10 @@ mod bsp;
 mod console;
 mod cpu;
 mod driver;
-mod panic;
+mod exception;
 mod init;
 mod memory;
+mod panic;
 mod print;
 mod synchronisation;
 mod time;
@@ -129,30 +133,51 @@ mod time;
 /// # Safety
 ///
 /// - Only a single core must be active and running this function.
-/// - The init calls in this function must appear in the correct order.
+/// - The init calls in this function must appear in the correct order:
+///     - Virtual memory must be activated before the device drivers.
+///       - Without it, any atomic operations, e.g. the yet-to-be-introduced spinlocks in the device
+///         drivers (which currently employ NullLocks instead of spinlocks), will fail to work on
+///         the RPi SoCs.
 unsafe fn kernel_init() -> ! {
     use driver::interface::DriverManager;
-    
+    use memory::mmu::interface::MMU;
+
+    exception::handling_init();
+
+    if let Err(string) = memory::mmu::mmu().init() {
+        panic!("MMU: {}", string);
+    }
+
     for i in bsp::driver::driver_manager().all_device_drivers().iter() {
         if let Err(x) = i.init() {
             panic!("Error loading driver: {}: {}", i.compatible(), x);
         }
     }
-
     bsp::driver::driver_manager().post_device_driver_init();
     // println! is usable from here on.
 
     // Transition from unsafe to safe.
     kernel_main()
 }
-        
+
 /// The main function running after the early init.
 fn kernel_main() -> ! {
+    use bsp::console::console;
+    use console::interface::All;
     use core::time::Duration;
     use driver::interface::DriverManager;
     use time::interface::TimeManager;
 
     info!("Booting on: {}", bsp::board_name());
+
+    info!("MMU online. Special regions:");
+    bsp::memory::mmu::virt_mem_layout().print_layout();
+
+    let (_, privilege_level) = exception::current_privilege_level();
+    info!("Current privilege level: {}", privilege_level);
+
+    info!("Exception handling state:");
+    exception::asynchronous::print_state();
 
     info!(
         "Architectural timer resolution: {} ns",
@@ -168,11 +193,37 @@ fn kernel_main() -> ! {
         info!("      {}. {}", i + 1, driver.compatible());
     }
 
-    // Test a failing timer case.
-    time::time_manager().spin_for(Duration::from_nanos(1));
+    info!("Timer test, spinning for 1 second");
+    time::time_manager().spin_for(Duration::from_secs(1));
 
+    // Cause an exception by accessing a virtual address for which no translation was set up. This
+    // code accesses the address 8 GiB, which is outside the mapped address space.
+    //
+    // For demo purposes, the exception handler will catch the faulting 8 GiB address and allow
+    // execution to continue.
+    info!("");
+    info!("Trying to read from address 8 GiB...");
+    let mut big_addr: u64 = 8 * 1024 * 1024 * 1024;
+    unsafe { core::ptr::read_volatile(big_addr as *mut u64) };
+
+    info!("************************************************");
+    info!("Whoa! We recovered from a synchronous exception!");
+    info!("************************************************");
+    info!("");
+    info!("Let's try again");
+
+    // Now use address 9 GiB. The exception handler won't forgive us this time.
+    info!("Trying to read from address 9 GiB...");
+    big_addr = 9 * 1024 * 1024 * 1024;
+    unsafe { core::ptr::read_volatile(big_addr as *mut u64) };
+    
+    // Will never reach here in this tutorial.
+    info!("Echoing input now");
+
+    // Discard any spurious received characters before going into echo mode.
+    console().clear_rx();
     loop {
-        info!("Spinning for 1 second");
-        time::time_manager().spin_for(Duration::from_secs(1));
+        let c = bsp::console::console().read_char();
+        bsp::console::console().write_char(c);
     }
 }

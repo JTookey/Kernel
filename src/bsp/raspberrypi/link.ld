@@ -10,20 +10,32 @@ SECTIONS
     /* Set current address to the value from which the RPi starts execution */
     . = KERNEL_OFFSET;
 
+    __ro_start = .;
     .text :
     {
         *(.text._start) *(.text*)
     }
 
+
+    .exception_vectors :
+    {
+        *(.exception_vectors*)
+    }
+
+
     .rodata :
     {
         *(.rodata*)
     }
+    . = ALIGN(65536); /* Fill up to 64 KiB */
+    __ro_end = .;
+
 
     .data :
     {
         *(.data*)
     }
+
 
     /* Section is zeroed in u64 chunks, align start and end to 8 bytes */
     .bss ALIGN(8):

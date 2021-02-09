@@ -4,6 +4,8 @@
 
 //! BSP Memory Management.
 
+pub mod mmu;
+
 use core::{cell::UnsafeCell, ops::RangeInclusive};
 
 //--------------------------------------------------------------------------------------------------
@@ -14,6 +16,8 @@ use core::{cell::UnsafeCell, ops::RangeInclusive};
 extern "Rust" {
     static __bss_start: UnsafeCell<u64>;
     static __bss_end_inclusive: UnsafeCell<u64>;
+    static __ro_start: UnsafeCell<()>;
+    static __ro_end: UnsafeCell<()>;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -23,8 +27,22 @@ extern "Rust" {
 /// The board's memory map.
 #[rustfmt::skip]
 pub(super) mod map {
-    pub const BOOT_CORE_STACK_END: usize = 0x8_0000;
+    /// The inclusive end address of the memory map.
+    ///
+    /// End address + 1 must be power of two.
+    ///
+    /// # Note
+    ///
+    /// RPi3 and RPi4 boards can have different amounts of RAM. To make our code lean for
+    /// educational purposes, we set the max size of the address space to 4 GiB regardless of board.
+    /// This way, we can map the entire range that we need (end of MMIO for RPi4) in one take.
+    ///
+    /// However, making this trade-off has the downside of making it possible for the CPU to assert a
+    /// physical address that is not backed by any DRAM (e.g. accessing an address close to 4 GiB on
+    /// an RPi3 that comes with 1 GiB of RAM). This would result in a crash or other kind of error.
+    pub const END_INCLUSIVE:       usize = 0xFFFF_FFFF;
 
+    pub const BOOT_CORE_STACK_END: usize = 0x8_0000;
 
     pub const GPIO_OFFSET:         usize = 0x0020_0000;
     pub const UART_OFFSET:         usize = 0x0020_1000;
@@ -37,6 +55,7 @@ pub(super) mod map {
         pub const START:            usize =         0x3F00_0000;
         pub const GPIO_START:       usize = START + GPIO_OFFSET;
         pub const PL011_UART_START: usize = START + UART_OFFSET;
+        pub const END_INCLUSIVE:    usize =         0x4000_FFFF;
     }
 
     /// Physical devices.
@@ -47,7 +66,32 @@ pub(super) mod map {
         pub const START:            usize =         0xFE00_0000;
         pub const GPIO_START:       usize = START + GPIO_OFFSET;
         pub const PL011_UART_START: usize = START + UART_OFFSET;
+        pub const END_INCLUSIVE:    usize =         0xFF84_FFFF;
     }
+}
+
+//--------------------------------------------------------------------------------------------------
+// Private Code
+//--------------------------------------------------------------------------------------------------
+
+/// Start address of the Read-Only (RO) range.
+///
+/// # Safety
+///
+/// - Value is provided by the linker script and must be trusted as-is.
+#[inline(always)]
+fn ro_start() -> usize {
+    unsafe { __ro_start.get() as usize }
+}
+
+/// Size of the Read-Only (RO) range of the kernel binary.
+///
+/// # Safety
+///
+/// - Value is provided by the linker script and must be trusted as-is.
+#[inline(always)]
+fn ro_end() -> usize {
+    unsafe { __ro_end.get() as usize }
 }
 
 //--------------------------------------------------------------------------------------------------
